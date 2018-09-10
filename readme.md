@@ -7,16 +7,18 @@ Everything in the puppet manifest should be able to run without needing anything
 ##SAMPLE Puppet layout:##
 
 **Directories**
+```
 ./puppet/
 ./puppet/environments
 ./puppet/environments/production/manifests/
 ./hieradata
 ./hieradata/node
-
+```
 
 Main entrypoint for puppet manifests (place node definitions here)
+```
 ./puppet/environments/production/manifests/main.pp
-
+```
 ## Puppetfile ##
 ```Ruby
 #!/usr/bin/env ruby
