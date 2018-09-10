@@ -4,7 +4,7 @@ Summary - place this file and the ami_creation folder inside of the roof of your
 Use this script to create a new AMI for an instance given only a node name. 
 Everything in the puppet manifest should be able to run without needing anything other than the instance's target FQDN (Fully Qualified Domain Name).
 
-##SAMPLE Puppet layout:##
+## SAMPLE Puppet layout
 
 **Directories**
 ```
