@@ -6,7 +6,7 @@ install_puppet() {
         curl -O https://apt.puppetlabs.com/puppet5-release-xenial.deb
     fi
     sudo dpkg -i puppet5-release-xenial.deb
-    sudo apt-get update && sudo apt-get install puppet-agent librarian-puppet -y && sudo apt-get dist-upgrade -y && sudo apt-get autoremove -y
+    sudo apt-get update && sudo apt-get install puppet-agent librarian-puppet -y && sudo DEBIAN_FRONTEND=noninteractive UCF_FORCE_CONFOLD=1 apt-get --yes --force-yes -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" dist-upgrade && sudo apt-get autoremove -y
     sudo ln -sf /opt/puppetlabs/puppet/bin/puppet /usr/local/bin/puppet
 }
 

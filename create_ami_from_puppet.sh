@@ -188,9 +188,15 @@ sanity_check_provided_arguments() {
         echo >&2 "Checking IAM Profile exists..."
         local COUNT_OF_ROLES
         local ROLE_CHECK_CMD
-        ROLE_CHECK_CMD="aws iam list-instance-profiles | jq '.InstanceProfiles[].Roles[]' | jq -r '.RoleName' | grep '${AWS_IAM_PROFILE}' | wc -l"
+        ROLE_CHECK_CMD="aws iam list-instance-profiles --profile ${AWS_PROFILE} | jq '.InstanceProfiles[].Roles[]' | jq -r '.RoleName' | grep '${AWS_IAM_PROFILE}' | wc -l"
         COUNT_OF_ROLES=$(eval ${ROLE_CHECK_CMD})
-        if [ ${COUNT_OF_ROLES} - eq 0 ]; then
+
+        if [ $? -gt 0 ]; then
+            echo >&2 "There was an error checking the instance profiles: ${COUNT_OF_ROLES}"
+            exit 2
+        fi
+
+        if [ ${COUNT_OF_ROLES} -eq 0 ]; then
             echo >&2 -e "${RED}IAM INSTANCE PROFILE NOT FOUND!${NC}"
             exit 2
         fi
@@ -319,17 +325,26 @@ rsync_configs_folder() {
 }
 
 update_remote_packages() {
+    local CMD
+    local CMD_OUTPUT
+    local CMD_EXIT_CODE
     ## Update all dependencies on the OS
-    UPDATE_CMD="ssh -q -t ubuntu@${PUBLIC_IP_ADDRESS} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i \"${SSH_PRIVATE_KEY_PATH}\" \"sudo apt-get update; sudo apt-get dist-upgrade -y; sudo apt-get autoremove -y;\" 2>&1"
+    CMD="ssh -q -t ubuntu@${PUBLIC_IP_ADDRESS} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i \"${SSH_PRIVATE_KEY_PATH}\" \"sudo apt-get update; apt-get --yes --force-yes -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" dist-upgrade; sudo apt-get autoremove -y;\" 2>&1"
 
-    UPDATE_PACKAGES_OUTPUT=$(eval ${UPDATE_CMD})
+    CMD_OUTPUT=$(eval ${UPDATE_CMD})
+    CMD_EXIT_CODE=$?
+    if [ ${CMD_EXIT_CODE} -gt 0 ]; then
+        echo >&2 -e "${RED}Error update remote package.${NC}"
+        echo >&2 ${CMD_OUTPUT}
+        exit 2
+    fi
 }
 
 install_puppet() {
     local CMD
     local CMD_OUTPUT
     local CMD_EXIT_CODE
-    CMD="ssh -q -t ubuntu@${PUBLIC_IP_ADDRESS} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i \"${SSH_PRIVATE_KEY_PATH}\" \"cd /home/ubuntu && curl -O https://apt.puppetlabs.com/puppet5-release-xenial.deb && sudo dpkg -i puppet5-release-xenial.deb && sudo apt-get update && sudo apt-get install puppet-agent librarian-puppet -y && sudo apt-get dist-upgrade -y && sudo apt-get autoremove -y && sudo ln -sf /opt/puppetlabs/puppet/bin/puppet /usr/local/bin/puppet && sudo dpkg -l | grep puppet;\" 2>&1"
+    CMD="ssh -q -t ubuntu@${PUBLIC_IP_ADDRESS} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i \"${SSH_PRIVATE_KEY_PATH}\" \"cd /home/ubuntu && curl -O https://apt.puppetlabs.com/puppet5-release-xenial.deb && sudo dpkg -i puppet5-release-xenial.deb && sudo apt-get update && sudo apt-get install puppet-agent librarian-puppet -y && sudo ln -sf /opt/puppetlabs/puppet/bin/puppet /usr/local/bin/puppet && sudo dpkg -l | grep puppet;\" 2>&1"
     echo >&2 "Installing puppet: ${CMD}"
     CMD_OUTPUT=$(eval ${CMD})
     CMD_EXIT_CODE=$?
@@ -396,8 +411,7 @@ remove_puppet_agent() {
     REMOVE_PUPPET_OUTPUT=$(eval ${REMOVE_PUPPET_CMD})
     REMOVE_PUPPET_SUCCESS=$?
     if [ ${REMOVE_PUPPET_SUCCESS} -gt 0 ]; then
-        echo >&2 -e "${RED}Removing puppet-agent failed. Exit code: $?${NC}"
-        exit 2
+        echo >&2 -e "${RED}Removing puppet-agent failed. Exit code: $?${NC} ... continuing on because this seems to intermittently fail and doesn't _have_ to be gone."
     fi
     echo >&2 "removal of puppet: ${REMOVE_PUPPET_OUTPUT}"
 }
@@ -420,10 +434,19 @@ bake_ami() {
     local CREATE_AMI_CMD
     local BAKE_AMI_OUTPUT
 
+    if [ -e "/tmp/bake_ami_stderr.log" ]; then
+        rm /tmp/bake_ami_stderr.log
+    fi
+
     ## Bake out the AMI
-    CREATE_AMI_CMD="./ami_creation/create_ami_from_instance.sh -m ${INSTANCE_ID} -p ${AWS_PROFILE} -r ${AWS_REGION} -f ${NODE_FQDN} 2>&1"
+    CREATE_AMI_CMD="${SOURCE}/ami_creation/create_ami_from_instance.sh -m ${INSTANCE_ID} -p ${AWS_PROFILE} -r ${AWS_REGION} -f ${NODE_FQDN} 2>/tmp/bake_ami_stderr.log"
     BAKE_AMI_OUTPUT=$(eval ${CREATE_AMI_CMD})
-    echo >&2 ${BAKE_AMI_OUTPUT}
+    ### The ONE spot we want output to stdout! this is so we can chain the AMI ID out to a create launch configuration script.
+    echo ${BAKE_AMI_OUTPUT}
+    local CRATE_AMI_STDERR
+    CREATE_AMI_STDERR=$(cat "/tmp/bake_ami_stderr.log")
+    echo >&2 ${CREATE_AMI_STDERR}
+    rm /tmp/bake_ami_stderr.log
     echo >&2 "finished bake_ami function. Moving on to the next step."
 }
 
@@ -514,6 +537,7 @@ get_public_ip_from_instance_id
 ## on the instance
 rsync_configs_folder
 name_the_remote_system
+update_remote_packages
 
 ## puppet commands
 install_puppet
